@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#222826" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Eng Training" />
+    <title>GK Eng Training</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/app-icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div class="lock-screen" id="lockScreen">
+      <form class="lock-card" id="lockForm">
+        <p class="security-eyebrow">Encrypted local vault</p>
+        <h1 id="lockTitle">Unlock Eng Training</h1>
+        <p id="lockMessage" class="lock-message"></p>
+        <label>
+          <span>Passphrase</span>
+          <input id="passphraseInput" type="password" autocomplete="current-password" minlength="10" required />
+        </label>
+        <label id="confirmPassphraseLabel" hidden>
+          <span>Confirm passphrase</span>
+          <input id="confirmPassphraseInput" type="password" autocomplete="new-password" minlength="10" />
+        </label>
+        <label id="autoLockLabel">
+          <span>Auto-lock</span>
+          <select id="autoLockMinutes">
+            <option value="5">5 minutes</option>
+            <option value="15" selected>15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+        </label>
+        <button class="primary-action" type="submit" id="unlockBtn">Unlock</button>
+        <p class="security-note">
+          Data is encrypted in this browser with your passphrase. The passphrase cannot be recovered.
+        </p>
+      </form>
+    </div>
+
+    <div class="app-shell">
+      <aside class="side-nav" aria-label="Main navigation">
+        <div class="brand">
+          <span class="brand-mark">GK</span>
+          <div>
+            <strong>Eng Training</strong>
+            <small>LP / Business English</small>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-button active" type="button" data-view="daily" title="Daily Intake">
+            <span>10</span>
+            <b>Daily</b>
+          </button>
+          <button class="nav-button" type="button" data-view="candidates" title="Candidates">
+            <span>+</span>
+            <b>Inbox</b>
+          </button>
+          <button class="nav-button" type="button" data-view="bank" title="Phrase Bank">
+            <span>#</span>
+            <b>Bank</b>
+          </button>
+          <button class="nav-button" type="button" data-view="quiz" title="Quiz">
+            <span>?</span>
+            <b>Quiz</b>
+          </button>
+          <button class="nav-button" type="button" data-view="import" title="Import and Export">
+            <span>IO</span>
+            <b>Import</b>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="main-area">
+        <header class="top-bar">
+          <div>
+            <p class="eyebrow" id="todayLabel"></p>
+            <h1 id="viewTitle">Daily Intake</h1>
+          </div>
+          <div class="stat-strip">
+            <div><span id="statPhrases">0</span><small>cards</small></div>
+            <div><span id="statDue">0</span><small>due</small></div>
+            <div><span id="statCandidates">0</span><small>inbox</small></div>
+          </div>
+          <div class="security-actions">
+            <span class="security-badge" id="securityBadge">encrypted</span>
+            <button class="secondary-action" type="button" id="lockNowBtn">Lock</button>
+          </div>
+        </header>
+
+        <section class="view active" id="view-daily" aria-labelledby="dailyHeading">
+          <div class="toolbar">
+            <div class="segmented" role="tablist" aria-label="Daily theme">
+              <button type="button" class="segment active" data-theme="LP meeting">LP meeting</button>
+              <button type="button" class="segment" data-theme="Formal casual">Formal casual</button>
+              <button type="button" class="segment" data-theme="Dears narrative">Dears narrative</button>
+            </div>
+            <label class="toolbar-field">
+              <span>Confidentiality</span>
+              <select id="dailyConfidentiality">
+                <option>internal</option>
+                <option>confidential</option>
+                <option>highly confidential</option>
+                <option>public</option>
+              </select>
+            </label>
+            <button class="primary-action" type="button" id="saveDailyBtn">Save intake</button>
+          </div>
+          <div class="question-grid" id="dailyQuestions"></div>
+        </section>
+
+        <section class="view" id="view-candidates" aria-labelledby="candidateHeading">
+          <div class="split-layout">
+            <div class="panel">
+              <div class="panel-head">
+                <h2 id="candidateHeading">Inbox</h2>
+                <button class="ghost-action" type="button" id="clearResolvedCandidatesBtn">Clear resolved</button>
+              </div>
+              <div class="candidate-list" id="candidateList"></div>
+            </div>
+            <form class="editor-panel" id="phraseForm">
+              <input type="hidden" id="editingPhraseId" />
+              <input type="hidden" id="editingCandidateId" />
+              <label>
+                <span>Original question (Japanese)</span>
+                <textarea id="sourceQuestionJp" rows="3"></textarea>
+              </label>
+              <label>
+                <span>Original question (English)</span>
+                <textarea id="sourceQuestionEn" rows="3"></textarea>
+              </label>
+              <label>
+                <span>Japanese intent</span>
+                <textarea id="phraseJp" rows="4" required></textarea>
+              </label>
+              <label>
+                <span>English phrase</span>
+                <textarea id="phraseEn" rows="4" required></textarea>
+              </label>
+              <div class="form-row">
+                <label>
+                  <span>Context</span>
+                  <select id="phraseContext">
+                    <option>LP meeting</option>
+                    <option>Formal casual</option>
+                    <option>Dears narrative</option>
+                    <option>Founder conversation</option>
+                    <option>DD / IC</option>
+                    <option>Small talk</option>
+                    <option>chatbot input</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Register</span>
+                  <select id="phraseRegister">
+                    <option>institutional</option>
+                    <option>polished casual</option>
+                    <option>direct</option>
+                    <option>softening</option>
+                    <option>defensive</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>Confidentiality</span>
+                <select id="phraseConfidentiality">
+                  <option>internal</option>
+                  <option>confidential</option>
+                  <option>highly confidential</option>
+                  <option>public</option>
+                </select>
+              </label>
+              <label>
+                <span>Tags</span>
+                <input id="phraseTags" type="text" placeholder="LP, value creation, risk" />
+              </label>
+              <label>
+                <span>Why better</span>
+                <textarea id="phraseWhy" rows="3"></textarea>
+              </label>
+              <div class="form-actions">
+                <button class="secondary-action" type="button" id="resetPhraseFormBtn">Reset</button>
+                <button class="primary-action" type="submit">Save card</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="view" id="view-bank" aria-labelledby="bankHeading">
+          <div class="toolbar">
+            <div class="search-wrap">
+              <input id="bankSearch" type="search" placeholder="Search phrases" />
+            </div>
+            <select id="bankFilter">
+              <option value="all">All cards</option>
+              <option value="active">Active</option>
+              <option value="mastered">Mastered</option>
+              <option value="due">Due</option>
+            </select>
+            <button class="primary-action" type="button" id="newPhraseBtn">New card</button>
+          </div>
+          <div class="phrase-table" id="phraseTable"></div>
+        </section>
+
+        <section class="view" id="view-quiz" aria-labelledby="quizHeading">
+          <div class="quiz-layout">
+            <div class="quiz-card" id="quizCard"></div>
+            <aside class="review-panel">
+              <h2 id="quizHeading">Review</h2>
+              <div class="review-metrics">
+                <div><span id="reviewRemaining">0</span><small>remaining</small></div>
+                <div><span id="reviewMastered">0</span><small>mastered</small></div>
+              </div>
+              <div class="context-filters" id="quizContextFilters"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-import" aria-labelledby="importHeading">
+          <div class="import-layout">
+            <div class="panel">
+              <div class="panel-head">
+                <h2 id="importHeading">ChatBot Import</h2>
+              </div>
+              <textarea id="importText" rows="12" placeholder="Paste Japanese notes, meeting reflections, or JSON import data"></textarea>
+              <div class="form-row">
+                <label>
+                  <span>Context</span>
+                  <select id="importContext">
+                    <option>chatbot input</option>
+                    <option>LP meeting</option>
+                    <option>Formal casual</option>
+                    <option>Dears narrative</option>
+                    <option>Founder conversation</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Source</span>
+                  <input id="importSource" type="text" value="GK_ChatBot_PJ" />
+                </label>
+              </div>
+              <label>
+                <span>Confidentiality</span>
+                <select id="importConfidentiality">
+                  <option>internal</option>
+                  <option>confidential</option>
+                  <option>highly confidential</option>
+                  <option>public</option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <input id="importFile" type="file" accept=".json,.md,.txt" />
+                <button class="primary-action" type="button" id="importBtn">Import</button>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Data</h2>
+              </div>
+              <div class="data-actions">
+                <button class="secondary-action" type="button" id="exportBtn">Export encrypted backup</button>
+                <button class="danger-action" type="button" id="exportPlaintextBtn">Export plaintext JSON</button>
+                <button class="secondary-action" type="button" id="copyCodexPromptBtn">Copy Codex prompt</button>
+                <button class="danger-action" type="button" id="resetDataBtn">Reset local data</button>
+              </div>
+              <pre id="dataPreview"></pre>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

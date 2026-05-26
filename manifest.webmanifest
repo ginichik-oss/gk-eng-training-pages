@@ -1,0 +1,19 @@
+{
+  "name": "GK Eng Training",
+  "short_name": "Eng Training",
+  "description": "Local-first English phrase training for LP and business conversations.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f5ef",
+  "theme_color": "#222826",
+  "icons": [
+    {
+      "src": "icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
