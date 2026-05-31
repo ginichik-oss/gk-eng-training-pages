@@ -1,4 +1,4 @@
-const CACHE_NAME = "gk-eng-training-v1";
+const CACHE_NAME = "gk-eng-training-v2";
 const APP_ASSETS = [
   "./",
   "./index.html",
