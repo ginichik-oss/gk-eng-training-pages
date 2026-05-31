@@ -1,6 +1,11 @@
 const LEGACY_STORAGE_KEY = "gk-eng-training-v1";
 const STORAGE_KEY = "gk-eng-training-secure-v2";
 const AUTO_LOCK_STORAGE_KEY = "gk-eng-training-auto-lock-minutes";
+const SUPABASE_SESSION_KEY = "gk-eng-training-supabase-session-v1";
+const SUPABASE_URL = "https://wvauqvmvsgzhuuvqhkxh.supabase.co";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2YXVxdm12c2d6aHV1dnFoa3hoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyNTQ0ODIsImV4cCI6MjA5NTgzMDQ4Mn0.nE9qoDaWrFR9Mjzgoi4lK3bLaKPX9hWPUwjtgf5pxM0";
+const REMOTE_VAULT_TABLE = "user_vaults";
 const DEFAULT_AUTO_LOCK_MINUTES = 15;
 const KDF_ITERATIONS = 250000;
 const textEncoder = new TextEncoder();
@@ -244,6 +249,10 @@ let activeView = "daily";
 let activeTheme = "LP meeting";
 let activeQuizContext = "all";
 let currentQuizId = null;
+let authSession = null;
+let remoteEnvelope = null;
+let remoteVaultMeta = null;
+let syncStatus = "Not signed in";
 
 const els = {};
 
@@ -266,9 +275,18 @@ function bindElements() {
   els.lockForm = document.querySelector("#lockForm");
   els.lockTitle = document.querySelector("#lockTitle");
   els.lockMessage = document.querySelector("#lockMessage");
+  els.authPanel = document.querySelector("#authPanel");
+  els.authStatus = document.querySelector("#authStatus");
+  els.authEmail = document.querySelector("#authEmail");
+  els.authPassword = document.querySelector("#authPassword");
+  els.signInBtn = document.querySelector("#signInBtn");
+  els.signUpBtn = document.querySelector("#signUpBtn");
+  els.signOutBtn = document.querySelector("#signOutBtn");
+  els.passphraseLabel = document.querySelector("#passphraseLabel");
   els.passphraseInput = document.querySelector("#passphraseInput");
   els.confirmPassphraseLabel = document.querySelector("#confirmPassphraseLabel");
   els.confirmPassphraseInput = document.querySelector("#confirmPassphraseInput");
+  els.autoLockLabel = document.querySelector("#autoLockLabel");
   els.autoLockMinutes = document.querySelector("#autoLockMinutes");
   els.unlockBtn = document.querySelector("#unlockBtn");
   els.todayLabel = document.querySelector("#todayLabel");
@@ -320,6 +338,9 @@ function bindElements() {
 
 function bindEvents() {
   els.lockForm.addEventListener("submit", handleUnlockSubmit);
+  els.signInBtn.addEventListener("click", handleSignIn);
+  els.signUpBtn.addEventListener("click", handleSignUp);
+  els.signOutBtn.addEventListener("click", handleSignOut);
   els.lockNowBtn.addEventListener("click", lockApp);
   ["click", "keydown", "mousemove", "touchstart"].forEach((eventName) => {
     window.addEventListener(eventName, resetAutoLockTimer, { passive: true });
@@ -367,9 +388,33 @@ async function initializeSecureApp() {
   }
   const storedMinutes = Number(localStorage.getItem(AUTO_LOCK_STORAGE_KEY)) || DEFAULT_AUTO_LOCK_MINUTES;
   els.autoLockMinutes.value = String(storedMinutes);
+  authSession = loadStoredAuthSession();
+  if (authSession) {
+    try {
+      await ensureAuthSession();
+    } catch {
+      clearStoredAuthSession();
+      authSession = null;
+      syncStatus = "Sign in again";
+    }
+    if (authSession) {
+      try {
+        await loadRemoteVault();
+      } catch {
+        remoteEnvelope = null;
+        remoteVaultMeta = null;
+        syncStatus = "Remote vault unavailable";
+      }
+    }
+  }
+  updateAuthUi();
+  if (isSupabaseConfigured() && !authSession) {
+    showLockScreen("auth");
+    return;
+  }
   const hasSecureState = Boolean(localStorage.getItem(STORAGE_KEY));
   const hasLegacyState = Boolean(localStorage.getItem(LEGACY_STORAGE_KEY));
-  showLockScreen(hasSecureState ? "unlock" : "setup", hasLegacyState);
+  showLockScreen(remoteEnvelope || hasSecureState ? "unlock" : "setup", hasLegacyState);
 }
 
 function initialState() {
@@ -391,27 +436,258 @@ function loadLegacyState() {
   }
 }
 
+function isSupabaseConfigured() {
+  return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+}
+
+function loadStoredAuthSession() {
+  try {
+    const raw = localStorage.getItem(SUPABASE_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeAuthSession(session) {
+  authSession = {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600),
+    user: session.user,
+  };
+  localStorage.setItem(SUPABASE_SESSION_KEY, JSON.stringify(authSession));
+}
+
+function clearStoredAuthSession() {
+  localStorage.removeItem(SUPABASE_SESSION_KEY);
+}
+
+function supabaseHeaders(token = authSession?.access_token) {
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${token || SUPABASE_ANON_KEY}`,
+  };
+}
+
+async function supabaseRequest(path, options = {}) {
+  const { token, headers = {}, ...fetchOptions } = options;
+  const response = await fetch(`${SUPABASE_URL}${path}`, {
+    ...fetchOptions,
+    headers: {
+      ...supabaseHeaders(token),
+      ...(fetchOptions.body ? { "Content-Type": "application/json" } : {}),
+      ...headers,
+    },
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(data?.msg || data?.message || `Supabase request failed: ${response.status}`);
+  }
+  return data;
+}
+
+async function ensureAuthSession() {
+  if (!authSession) return null;
+  const expiresAt = Number(authSession.expires_at || 0) * 1000;
+  if (expiresAt > Date.now() + 60000) return authSession;
+  const refreshed = await supabaseRequest("/auth/v1/token?grant_type=refresh_token", {
+    method: "POST",
+    token: SUPABASE_ANON_KEY,
+    body: JSON.stringify({ refresh_token: authSession.refresh_token }),
+  });
+  storeAuthSession(refreshed);
+  return authSession;
+}
+
+async function handleSignIn() {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) {
+    showToast("Enter email and login password");
+    return;
+  }
+  setAuthBusy(true);
+  try {
+    const session = await supabaseRequest("/auth/v1/token?grant_type=password", {
+      method: "POST",
+      token: SUPABASE_ANON_KEY,
+      body: JSON.stringify({ email, password }),
+    });
+    storeAuthSession(session);
+    els.authPassword.value = "";
+    try {
+      await loadRemoteVault();
+    } catch {
+      remoteEnvelope = null;
+      remoteVaultMeta = null;
+      syncStatus = "Remote vault unavailable";
+    }
+    updateAuthUi();
+    const hasLocalState = Boolean(localStorage.getItem(STORAGE_KEY));
+    showLockScreen(remoteEnvelope || hasLocalState ? "unlock" : "setup");
+    showToast("Signed in");
+  } catch (error) {
+    syncStatus = error.message;
+    updateAuthUi();
+    showToast("Could not sign in");
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function handleSignUp() {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || password.length < 8) {
+    showToast("Use email and at least 8 password characters");
+    return;
+  }
+  setAuthBusy(true);
+  try {
+    const session = await supabaseRequest("/auth/v1/signup", {
+      method: "POST",
+      token: SUPABASE_ANON_KEY,
+      body: JSON.stringify({ email, password }),
+    });
+    if (session.access_token) {
+      storeAuthSession(session);
+      els.authPassword.value = "";
+      try {
+        await loadRemoteVault();
+      } catch {
+        remoteEnvelope = null;
+        remoteVaultMeta = null;
+        syncStatus = "Remote vault unavailable";
+      }
+      updateAuthUi();
+      showLockScreen(remoteEnvelope || localStorage.getItem(STORAGE_KEY) ? "unlock" : "setup");
+      showToast("Login created");
+      return;
+    }
+    syncStatus = "Check your email to confirm login";
+    updateAuthUi();
+    showToast("Check email to confirm");
+  } catch (error) {
+    syncStatus = error.message;
+    updateAuthUi();
+    showToast("Could not create login");
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function handleSignOut() {
+  await pendingSave;
+  if (authSession?.access_token) {
+    supabaseRequest("/auth/v1/logout", { method: "POST" }).catch(() => {});
+  }
+  authSession = null;
+  remoteEnvelope = null;
+  remoteVaultMeta = null;
+  syncStatus = "Not signed in";
+  clearStoredAuthSession();
+  updateAuthUi();
+  await lockApp(true);
+  showLockScreen("auth");
+  showToast("Signed out");
+}
+
+function setAuthBusy(isBusy) {
+  els.signInBtn.disabled = isBusy;
+  els.signUpBtn.disabled = isBusy;
+  els.signOutBtn.disabled = isBusy;
+}
+
+function updateAuthUi() {
+  if (!els.authPanel) return;
+  const signedIn = Boolean(authSession?.user);
+  els.authStatus.textContent = signedIn
+    ? `${authSession.user.email || "Signed in"} | ${syncStatus}`
+    : syncStatus || "Not signed in";
+  els.authEmail.disabled = signedIn;
+  els.authEmail.value = signedIn ? authSession.user.email || "" : els.authEmail.value;
+  els.authPassword.closest("label").hidden = signedIn;
+  els.signInBtn.hidden = signedIn;
+  els.signUpBtn.hidden = signedIn;
+  els.signOutBtn.hidden = !signedIn;
+}
+
+async function loadRemoteVault() {
+  await ensureAuthSession();
+  const userId = authSession?.user?.id;
+  if (!userId) return null;
+  const rows = await supabaseRequest(
+    `/rest/v1/${REMOTE_VAULT_TABLE}?select=encrypted_vault,updated_at,client_updated_at&user_id=eq.${encodeURIComponent(
+      userId,
+    )}&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  remoteEnvelope = row?.encrypted_vault || null;
+  remoteVaultMeta = row ? { updatedAt: row.updated_at, clientUpdatedAt: row.client_updated_at } : null;
+  syncStatus = remoteEnvelope ? "Remote vault ready" : "No remote vault yet";
+  return remoteEnvelope;
+}
+
+async function saveRemoteVault(envelope) {
+  await ensureAuthSession();
+  const userId = authSession?.user?.id;
+  if (!userId) throw new Error("Not signed in");
+  const now = new Date().toISOString();
+  const rows = await supabaseRequest(`/rest/v1/${REMOTE_VAULT_TABLE}?on_conflict=user_id`, {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=representation",
+    },
+    body: JSON.stringify({
+      user_id: userId,
+      encrypted_vault: envelope,
+      client_updated_at: now,
+    }),
+  });
+  remoteEnvelope = Array.isArray(rows) && rows[0]?.encrypted_vault ? rows[0].encrypted_vault : envelope;
+  remoteVaultMeta = { updatedAt: Array.isArray(rows) ? rows[0]?.updated_at : null, clientUpdatedAt: now };
+  syncStatus = "Synced";
+  updateAuthUi();
+}
+
 function showLockScreen(mode, hasLegacyState = false) {
   document.body.classList.add("is-locked");
   els.lockForm.dataset.mode = mode;
   els.passphraseInput.value = "";
   els.confirmPassphraseInput.value = "";
-  els.confirmPassphraseLabel.hidden = mode !== "setup";
+  const authOnly = mode === "auth";
+  els.passphraseLabel.hidden = authOnly;
+  els.confirmPassphraseLabel.hidden = authOnly || mode !== "setup";
+  els.autoLockLabel.hidden = authOnly;
+  els.unlockBtn.hidden = authOnly;
   els.confirmPassphraseInput.required = mode === "setup";
+  els.passphraseInput.required = !authOnly;
   els.passphraseInput.autocomplete = mode === "setup" ? "new-password" : "current-password";
-  els.lockTitle.textContent = mode === "setup" ? "Set a vault passphrase" : "Unlock Eng Training";
+  els.lockTitle.textContent = authOnly
+    ? "Sign in to Eng Training"
+    : mode === "setup"
+      ? "Set a vault passphrase"
+      : "Unlock Eng Training";
   els.unlockBtn.textContent = mode === "setup" ? "Encrypt and start" : "Unlock";
-  els.lockMessage.textContent = mode === "setup"
-    ? hasLegacyState
-      ? "Existing local data will be migrated into an encrypted vault. Use a strong passphrase."
-      : "Create an encrypted local vault before storing fund or LP-related notes."
-    : "Enter your passphrase to decrypt the local vault.";
-  window.setTimeout(() => els.passphraseInput.focus(), 50);
+  els.lockMessage.textContent = authOnly
+    ? "Sign in first. The cloud stores only the encrypted vault; your vault passphrase still opens the contents locally."
+    : mode === "setup"
+      ? hasLegacyState
+        ? "Existing local data will be migrated into an encrypted vault. Use a strong passphrase."
+        : "Create an encrypted vault before storing fund or LP-related notes."
+      : "Enter your vault passphrase to decrypt the synced vault.";
+  window.setTimeout(() => (authOnly ? els.authEmail : els.passphraseInput).focus(), 50);
 }
 
 async function handleUnlockSubmit(event) {
   event.preventDefault();
   const mode = els.lockForm.dataset.mode;
+  if (mode === "auth") {
+    showToast("Sign in first");
+    return;
+  }
   const passphrase = els.passphraseInput.value;
   if (passphrase.length < 10) {
     showToast("Use at least 10 characters");
@@ -440,6 +716,7 @@ async function handleUnlockSubmit(event) {
     cryptoKey = await deriveAesKey(passphrase, cryptoSalt);
     state = normalizeState(await decryptEnvelope(envelope));
     localStorage.setItem(AUTO_LOCK_STORAGE_KEY, els.autoLockMinutes.value);
+    if (authSession && !remoteEnvelope) await saveState();
     unlockApp();
     showToast("Unlocked");
   } catch {
@@ -457,8 +734,8 @@ function unlockApp() {
   resetAutoLockTimer();
 }
 
-async function lockApp() {
-  if (!isUnlocked) return;
+async function lockApp(force = false) {
+  if (!isUnlocked && !force) return;
   await pendingSave;
   isUnlocked = false;
   state = null;
@@ -477,6 +754,7 @@ function resetAutoLockTimer() {
 }
 
 function getStoredEnvelope() {
+  if (remoteEnvelope) return remoteEnvelope;
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) throw new Error("No encrypted vault");
   const envelope = JSON.parse(raw);
@@ -594,8 +872,17 @@ function normalizeState(input) {
 async function saveState() {
   if (!state || !cryptoKey || !cryptoSalt) return pendingSave;
   state.updatedAt = new Date().toISOString();
-  pendingSave = encryptEnvelope(state).then((envelope) => {
+  pendingSave = encryptEnvelope(state).then(async (envelope) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+    remoteEnvelope = envelope;
+    if (isSupabaseConfigured() && authSession) {
+      try {
+        await saveRemoteVault(envelope);
+      } catch (error) {
+        syncStatus = `Saved locally; sync failed`;
+        updateAuthUi();
+      }
+    }
   });
   return pendingSave;
 }
@@ -708,7 +995,9 @@ function renderChrome() {
   els.statPhrases.textContent = state.phrases.length;
   els.statDue.textContent = duePhrases().length;
   els.statCandidates.textContent = state.candidates.filter((item) => item.status !== "resolved").length;
-  els.securityBadge.textContent = `encrypted | auto-lock ${els.autoLockMinutes.value}m`;
+  els.securityBadge.textContent = `encrypted | ${authSession ? syncStatus : "local only"} | auto-lock ${
+    els.autoLockMinutes.value
+  }m`;
 }
 
 function setActiveView(view) {
@@ -1385,7 +1674,10 @@ function renderImportPreview() {
     (candidate) => candidate.status !== "resolved" && candidate.confidentiality !== "public",
   ).length;
   const preview = {
-    storage: "encrypted local vault",
+    storage: authSession ? "encrypted local vault + Supabase sync" : "encrypted local vault",
+    signedIn: Boolean(authSession),
+    syncStatus,
+    remoteVaultUpdatedAt: remoteVaultMeta?.updatedAt || null,
     autoLockMinutes: Number(els.autoLockMinutes.value),
     phrases: state.phrases.length,
     due: duePhrases().length,

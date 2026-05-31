@@ -17,7 +17,26 @@
         <p class="security-eyebrow">Encrypted local vault</p>
         <h1 id="lockTitle">Unlock Eng Training</h1>
         <p id="lockMessage" class="lock-message"></p>
-        <label>
+        <div class="auth-panel" id="authPanel">
+          <div class="auth-head">
+            <strong>Cloud login</strong>
+            <span id="authStatus">Not signed in</span>
+          </div>
+          <label>
+            <span>Email</span>
+            <input id="authEmail" type="email" autocomplete="username" />
+          </label>
+          <label>
+            <span>Login password</span>
+            <input id="authPassword" type="password" autocomplete="current-password" minlength="8" />
+          </label>
+          <div class="form-actions compact-actions">
+            <button class="primary-action" type="button" id="signInBtn">Sign in</button>
+            <button class="secondary-action" type="button" id="signUpBtn">Create login</button>
+            <button class="ghost-action" type="button" id="signOutBtn" hidden>Sign out</button>
+          </div>
+        </div>
+        <label id="passphraseLabel">
           <span>Passphrase</span>
           <input id="passphraseInput" type="password" autocomplete="current-password" minlength="10" required />
         </label>

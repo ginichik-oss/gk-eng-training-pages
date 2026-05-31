@@ -19,6 +19,15 @@ This app can be published as a static GitHub Pages site. The app code is public 
 - Add the site to the phone home screen for a standalone app-like experience.
 - Keep plaintext exports off GitHub and out of shared folders.
 
+## Supabase Sync
+
+The app can sign in with Supabase Auth and store the encrypted vault in Supabase for PC / phone sync.
+
+- Run `supabase/setup.sql` in the Supabase SQL Editor before using sync.
+- The client uses the Supabase project URL and anon key only.
+- Never share or commit the `service_role` key, database password, vault passphrase, or plaintext exports.
+- Supabase stores only the encrypted vault envelope. The browser still decrypts locally with the vault passphrase.
+
 ## Security Model
 
 This is a local-first training app, not a multi-user enterprise system. The current security posture is:

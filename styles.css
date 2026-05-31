@@ -92,6 +92,35 @@ body.is-locked .lock-screen {
   font-size: 13px;
 }
 
+.auth-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.auth-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.auth-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.compact-actions {
+  margin-bottom: 0;
+}
+
 button,
 input,
 select,
