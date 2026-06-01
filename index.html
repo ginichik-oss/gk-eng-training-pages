@@ -159,6 +159,32 @@
                 <span>English phrase</span>
                 <textarea id="phraseEn" rows="4" required></textarea>
               </label>
+              <div class="ai-panel">
+                <div class="form-row">
+                  <label>
+                    <span>AI policy</span>
+                    <select id="aiPolicy">
+                      <option value="balanced">Balanced</option>
+                      <option value="strict">Strict</option>
+                      <option value="open">Open</option>
+                    </select>
+                  </label>
+                  <label class="checkbox-line">
+                    <input id="aiSanitize" type="checkbox" checked />
+                    <span>Redact before API</span>
+                  </label>
+                </div>
+                <label>
+                  <span>Redact terms</span>
+                  <input id="aiRedactTerms" type="text" placeholder="LP name, target, deal code, fund term" />
+                </label>
+                <div class="form-actions compact-actions">
+                  <button class="secondary-action" type="button" id="draftEnglishBtn">AI draft English</button>
+                  <button class="ghost-action" type="button" id="previewSanitizedBtn">Preview sanitized</button>
+                </div>
+                <p class="ai-notice" id="aiNotice"></p>
+                <pre class="ai-preview" id="aiPreview" hidden></pre>
+              </div>
               <div class="form-row">
                 <label>
                   <span>Context</span>

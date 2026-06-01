@@ -494,6 +494,57 @@ label span {
   color: var(--muted);
 }
 
+.ai-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: #f1f5f3;
+  border: 1px solid #d1ddd8;
+  border-radius: 8px;
+}
+
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding-top: 20px;
+}
+
+.checkbox-line input {
+  width: 18px;
+  min-height: 18px;
+  flex: 0 0 auto;
+}
+
+.ai-notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ai-notice.warn {
+  color: #7a2930;
+}
+
+.ai-notice.ok {
+  color: var(--accent);
+}
+
+.ai-preview {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  color: #38403c;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+
 .split-layout,
 .import-layout,
 .quiz-layout {

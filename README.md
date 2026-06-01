@@ -36,6 +36,8 @@ This is a local-first training app, not a multi-user enterprise system. The curr
 - The encryption key is derived from the passphrase using `PBKDF2-SHA256`.
 - The app auto-locks after the selected idle period.
 - Daily entries, candidates, phrase cards, and imports carry a confidentiality label.
+- AI English drafting uses a Supabase Edge Function so the OpenAI API key is never exposed in the browser.
+- AI drafting supports `Strict`, `Balanced`, and `Open` policy modes. `Balanced` is the default.
 - Encrypted backups can be exported and later restored through the import screen.
 - Plaintext JSON export is still available for migration, but requires confirmation.
 
@@ -44,7 +46,26 @@ Important limitations:
 - Data is decrypted in browser memory while the app is unlocked.
 - Anyone with the passphrase and access to the browser profile can unlock the vault.
 - Copying a Codex prompt or exporting plaintext can expose confidential content outside the vault.
+- AI drafting sends the selected text to the Supabase Edge Function and then to the OpenAI API. The app can redact terms first, but the user is responsible for choosing the right policy for the material.
 - Do not paste LP names, deal names, portfolio details, or fund terms into external tools unless that environment is approved.
+
+## AI Translation Setup
+
+The GitHub Pages app calls `supabase/functions/translate-phrase`. Deploy that Edge Function and set the OpenAI secret in Supabase before using `AI draft English`.
+
+```powershell
+supabase secrets set OPENAI_API_KEY=sk-...
+supabase secrets set OPENAI_MODEL=gpt-4.1-mini
+supabase functions deploy translate-phrase
+```
+
+Recommended policy behavior:
+
+- `Strict`: blocks `highly confidential` AI drafts.
+- `Balanced`: allows `confidential` after confirmation and allows `highly confidential` after stronger confirmation, preferably with redaction.
+- `Open`: allows broader drafting after confirmation.
+
+Use `Redact terms` for LP names, target names, deal codes, fund terms, emails, and amounts before sending text to the API.
 
 ## Main Workflows
 

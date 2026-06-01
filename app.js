@@ -8,6 +8,12 @@ const SUPABASE_ANON_KEY =
 const REMOTE_VAULT_TABLE = "user_vaults";
 const DEFAULT_AUTO_LOCK_MINUTES = 15;
 const KDF_ITERATIONS = 250000;
+const AI_FUNCTION_NAME = "translate-phrase";
+const DEFAULT_AI_SETTINGS = {
+  policy: "balanced",
+  sanitizeByDefault: true,
+  redactionTerms: "",
+};
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -307,6 +313,13 @@ function bindElements() {
   els.sourceQuestionEn = document.querySelector("#sourceQuestionEn");
   els.phraseJp = document.querySelector("#phraseJp");
   els.phraseEn = document.querySelector("#phraseEn");
+  els.aiPolicy = document.querySelector("#aiPolicy");
+  els.aiSanitize = document.querySelector("#aiSanitize");
+  els.aiRedactTerms = document.querySelector("#aiRedactTerms");
+  els.draftEnglishBtn = document.querySelector("#draftEnglishBtn");
+  els.previewSanitizedBtn = document.querySelector("#previewSanitizedBtn");
+  els.aiNotice = document.querySelector("#aiNotice");
+  els.aiPreview = document.querySelector("#aiPreview");
   els.phraseContext = document.querySelector("#phraseContext");
   els.phraseRegister = document.querySelector("#phraseRegister");
   els.phraseConfidentiality = document.querySelector("#phraseConfidentiality");
@@ -361,6 +374,12 @@ function bindEvents() {
 
   els.saveDailyBtn.addEventListener("click", saveDailyIntake);
   els.phraseForm.addEventListener("submit", savePhraseFromForm);
+  els.aiPolicy.addEventListener("change", updateAiSettingsFromControls);
+  els.aiSanitize.addEventListener("change", updateAiSettingsFromControls);
+  els.aiRedactTerms.addEventListener("change", updateAiSettingsFromControls);
+  els.phraseConfidentiality.addEventListener("change", renderAiPolicyNotice);
+  els.draftEnglishBtn.addEventListener("click", draftEnglishWithAi);
+  els.previewSanitizedBtn.addEventListener("click", previewSanitizedInput);
   els.resetPhraseFormBtn.addEventListener("click", resetPhraseForm);
   els.clearResolvedCandidatesBtn.addEventListener("click", clearResolvedCandidates);
   els.bankSearch.addEventListener("input", renderBank);
@@ -422,6 +441,7 @@ function initialState() {
     phrases: seedPhrases.map((phrase) => newPhrase(phrase)),
     candidates: [],
     intakes: [],
+    aiSettings: DEFAULT_AI_SETTINGS,
     createdAt: new Date().toISOString(),
   });
 }
@@ -863,10 +883,23 @@ function normalizeState(input) {
           confidentiality: intake.confidentiality || "internal",
         }))
       : [],
+    aiSettings: normalizeAiSettings(input.aiSettings),
     createdAt: input.createdAt || new Date().toISOString(),
     updatedAt: input.updatedAt || new Date().toISOString(),
   };
   return hydrateSourceQuestions(normalized);
+}
+
+function normalizeAiSettings(settings = {}) {
+  const policy = ["strict", "balanced", "open"].includes(settings.policy) ? settings.policy : DEFAULT_AI_SETTINGS.policy;
+  return {
+    policy,
+    sanitizeByDefault:
+      typeof settings.sanitizeByDefault === "boolean"
+        ? settings.sanitizeByDefault
+        : DEFAULT_AI_SETTINGS.sanitizeByDefault,
+    redactionTerms: typeof settings.redactionTerms === "string" ? settings.redactionTerms : "",
+  };
 }
 
 async function saveState() {
@@ -982,6 +1015,7 @@ function promptFromId(promptId) {
 
 function renderAll() {
   renderChrome();
+  renderAiControls();
   renderDaily();
   renderCandidates();
   renderBank();
@@ -998,6 +1032,49 @@ function renderChrome() {
   els.securityBadge.textContent = `encrypted | ${authSession ? syncStatus : "local only"} | auto-lock ${
     els.autoLockMinutes.value
   }m`;
+}
+
+function renderAiControls() {
+  if (!state?.aiSettings) return;
+  els.aiPolicy.value = optionOrDefault(els.aiPolicy, state.aiSettings.policy);
+  els.aiSanitize.checked = Boolean(state.aiSettings.sanitizeByDefault);
+  els.aiRedactTerms.value = state.aiSettings.redactionTerms || "";
+  renderAiPolicyNotice();
+}
+
+function renderAiPolicyNotice(message = "", tone = "") {
+  const policy = els.aiPolicy.value || DEFAULT_AI_SETTINGS.policy;
+  const confidentiality = els.phraseConfidentiality.value || "internal";
+  const defaultMessage = aiPolicyMessage(confidentiality, policy, els.aiSanitize.checked);
+  els.aiNotice.textContent = message || defaultMessage;
+  els.aiNotice.classList.toggle("warn", tone === "warn" || confidentiality === "highly confidential");
+  els.aiNotice.classList.toggle("ok", tone === "ok");
+}
+
+function aiPolicyMessage(confidentiality, policy, sanitize) {
+  if (policy === "strict" && confidentiality === "highly confidential") {
+    return "Strict blocks highly confidential AI drafts.";
+  }
+  if (confidentiality === "highly confidential") {
+    return sanitize
+      ? "Highly confidential drafts use redacted text unless you override at confirmation."
+      : "Highly confidential text will require explicit confirmation before API use.";
+  }
+  if (confidentiality === "confidential") {
+    return "Confidential drafts require confirmation before API use.";
+  }
+  return "AI drafts are not stored outside the encrypted vault.";
+}
+
+function updateAiSettingsFromControls() {
+  if (!state) return;
+  state.aiSettings = normalizeAiSettings({
+    policy: els.aiPolicy.value,
+    sanitizeByDefault: els.aiSanitize.checked,
+    redactionTerms: els.aiRedactTerms.value,
+  });
+  saveState();
+  renderAiPolicyNotice();
 }
 
 function setActiveView(view) {
@@ -1178,6 +1255,8 @@ function handleCandidateAction(event) {
     els.phraseJp.value = candidate.jp;
     els.phraseContext.value = optionOrDefault(els.phraseContext, candidate.context);
     els.phraseConfidentiality.value = optionOrDefault(els.phraseConfidentiality, candidate.confidentiality);
+    hideAiPreview();
+    renderAiPolicyNotice();
     els.phraseEn.focus();
   }
 
@@ -1234,6 +1313,190 @@ function savePhraseFromForm(event) {
   showToast("Card saved");
 }
 
+async function draftEnglishWithAi() {
+  const jp = els.phraseJp.value.trim();
+  if (!jp) {
+    showToast("Enter Japanese intent first");
+    return;
+  }
+  if (!isSupabaseConfigured() || !authSession) {
+    showToast("Sign in before AI draft");
+    return;
+  }
+
+  updateAiSettingsFromControls();
+  const confidentiality = els.phraseConfidentiality.value || "internal";
+  const policy = els.aiPolicy.value || DEFAULT_AI_SETTINGS.policy;
+  const sanitize = Boolean(els.aiSanitize.checked);
+  const rawFields = {
+    text: jp,
+    sourceQuestionJp: els.sourceQuestionJp.value.trim(),
+    sourceQuestionEn: els.sourceQuestionEn.value.trim(),
+  };
+  const prepared = sanitize ? sanitizeAiFields(rawFields, els.aiRedactTerms.value) : { fields: rawFields, placeholders: [] };
+  const changed = prepared.placeholders.length > 0;
+  const decision = aiPolicyDecision(confidentiality, policy, sanitize, prepared.placeholders.length);
+
+  if (decision.block) {
+    renderAiPolicyNotice(decision.message, "warn");
+    showToast("AI draft blocked by policy");
+    return;
+  }
+  if (decision.confirm && !window.confirm(decision.confirm)) return;
+
+  setAiBusy(true);
+  try {
+    const result = await callTranslateFunction({
+      ...prepared.fields,
+      context: els.phraseContext.value,
+      register: els.phraseRegister.value,
+      confidentiality,
+      policy,
+      sanitized: sanitize && changed,
+      confirmed: Boolean(decision.confirm),
+    });
+
+    if (result.en) els.phraseEn.value = result.en.trim();
+    if (!els.phraseWhy.value.trim() && result.whyBetter) {
+      els.phraseWhy.value = result.whyBetter.trim();
+    }
+    if (Array.isArray(result.tags) && result.tags.length > 0) {
+      els.phraseTags.value = mergeTagText(els.phraseTags.value, result.tags);
+    }
+    hideAiPreview();
+    renderAiPolicyNotice(
+      changed ? `Draft created with placeholders: ${prepared.placeholders.join(", ")}` : "Draft created",
+      "ok",
+    );
+    showToast("AI draft created");
+  } catch (error) {
+    renderAiPolicyNotice(error.message || "AI draft failed", "warn");
+    showToast("AI draft failed");
+  } finally {
+    setAiBusy(false);
+  }
+}
+
+function aiPolicyDecision(confidentiality, policy, sanitize, redactionCount = 0) {
+  if (policy === "strict" && confidentiality === "highly confidential") {
+    return { block: true, message: "Strict blocks highly confidential AI drafts." };
+  }
+  if (confidentiality === "highly confidential") {
+    return {
+      confirm: sanitize && redactionCount > 0
+        ? "Highly confidential text will be redacted before the OpenAI API request. Continue?"
+        : sanitize
+          ? "No redaction terms matched. This will send highly confidential text to the OpenAI API as entered. Continue?"
+        : "This will send highly confidential text to the OpenAI API without redaction. Continue?",
+    };
+  }
+  if (confidentiality === "confidential") {
+    return { confirm: "This will send confidential text to the OpenAI API for translation. Continue?" };
+  }
+  if (policy === "strict" && confidentiality === "internal" && !sanitize) {
+    return { confirm: "This will send internal text to the OpenAI API without redaction. Continue?" };
+  }
+  return {};
+}
+
+async function callTranslateFunction(payload) {
+  await ensureAuthSession();
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/${AI_FUNCTION_NAME}`, {
+    method: "POST",
+    headers: {
+      ...supabaseHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.error || `AI request failed: ${response.status}`);
+  }
+  return data;
+}
+
+function previewSanitizedInput() {
+  const fields = {
+    text: els.phraseJp.value.trim(),
+    sourceQuestionJp: els.sourceQuestionJp.value.trim(),
+    sourceQuestionEn: els.sourceQuestionEn.value.trim(),
+  };
+  const prepared = sanitizeAiFields(fields, els.aiRedactTerms.value);
+  const preview = [
+    prepared.fields.sourceQuestionJp ? `Q JP: ${prepared.fields.sourceQuestionJp}` : "",
+    prepared.fields.sourceQuestionEn ? `Q EN: ${prepared.fields.sourceQuestionEn}` : "",
+    prepared.fields.text ? `A JP: ${prepared.fields.text}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  els.aiPreview.textContent = preview || "Nothing to preview";
+  els.aiPreview.hidden = false;
+  renderAiPolicyNotice(
+    prepared.placeholders.length ? `Previewed placeholders: ${prepared.placeholders.join(", ")}` : "No redactions applied",
+    prepared.placeholders.length ? "ok" : "",
+  );
+}
+
+function sanitizeAiFields(fields, redactionTerms) {
+  const rules = redactionRules(redactionTerms);
+  const used = new Set();
+  const sanitized = {};
+  Object.entries(fields).forEach(([key, value]) => {
+    sanitized[key] = applyRedactionRules(value, rules, used);
+  });
+  return { fields: sanitized, placeholders: [...used] };
+}
+
+function redactionRules(redactionTerms) {
+  const terms = parseTags(redactionTerms).filter((term) => term.length >= 2);
+  const customRules = terms.map((term, index) => ({
+    pattern: new RegExp(escapeRegExp(term), "gi"),
+    replacement: `[REDACTED_${index + 1}]`,
+  }));
+  return [
+    ...customRules,
+    {
+      pattern: /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,
+      replacement: "[EMAIL]",
+    },
+    {
+      pattern: /(?:[$¥]\s*)?\d+(?:\.\d+)?\s*(?:億円|百万円|万円|円|bn|billion|million|m|JPY|USD|usd|jpy)/gi,
+      replacement: "[AMOUNT]",
+    },
+  ];
+}
+
+function applyRedactionRules(value, rules, used) {
+  const normalized = String(value || "").replace(/\r\n/g, "\n");
+  return rules.reduce((text, rule) => {
+    return text.replace(rule.pattern, () => {
+      used.add(rule.replacement);
+      return rule.replacement;
+    });
+  }, normalized);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mergeTagText(existing, tags) {
+  const merged = new Set([...parseTags(existing), ...tags.map((tag) => String(tag).trim()).filter(Boolean)]);
+  return [...merged].join(", ");
+}
+
+function setAiBusy(isBusy) {
+  els.draftEnglishBtn.disabled = isBusy;
+  els.previewSanitizedBtn.disabled = isBusy;
+  els.draftEnglishBtn.textContent = isBusy ? "Drafting..." : "AI draft English";
+}
+
+function hideAiPreview() {
+  els.aiPreview.hidden = true;
+  els.aiPreview.textContent = "";
+}
+
 function resetPhraseForm() {
   els.phraseForm.reset();
   els.editingPhraseId.value = "";
@@ -1243,6 +1506,8 @@ function resetPhraseForm() {
   els.phraseContext.value = "LP meeting";
   els.phraseRegister.value = "institutional";
   els.phraseConfidentiality.value = "internal";
+  hideAiPreview();
+  renderAiControls();
 }
 
 function clearResolvedCandidates() {
@@ -1342,6 +1607,8 @@ function handlePhraseAction(event) {
     els.phraseConfidentiality.value = optionOrDefault(els.phraseConfidentiality, phrase.confidentiality);
     els.phraseTags.value = phrase.tags.join(", ");
     els.phraseWhy.value = phrase.whyBetter || "";
+    hideAiPreview();
+    renderAiPolicyNotice();
     els.phraseEn.focus();
   }
 
