@@ -55,7 +55,7 @@ The GitHub Pages app calls `supabase/functions/translate-phrase`. Deploy that Ed
 
 ```powershell
 supabase secrets set OPENAI_API_KEY=sk-...
-supabase secrets set OPENAI_MODEL=gpt-4.1-mini
+supabase secrets set OPENAI_MODEL=gpt-5.5
 supabase functions deploy translate-phrase
 ```
 

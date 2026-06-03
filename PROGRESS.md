@@ -98,6 +98,9 @@ Deployment note:
 - After the user completed Supabase CLI login, `translate-phrase` was deployed successfully to project `wvauqvmvsgzhuuvqhkxh`.
 - The deploy command showed `WARNING: Docker is not running`, but the function deployment itself completed successfully.
 - Endpoint smoke check reached the deployed function. With anon headers but no signed-in user token, it returned `{"error":"Sign in required"}`, which confirms the function is deployed and enforcing login.
+- On 2026-06-03, the live app reached OpenAI but returned a generic OpenAI processing error with request ID `req_006068b13af248909282eb0a2b090c23`.
+- The Edge Function source was updated to default to current OpenAI docs guidance (`gpt-5.5`) when `OPENAI_MODEL` is unset, remove the older hard-coded default, and retry transient OpenAI status codes.
+- The updated `translate-phrase` function was redeployed successfully on 2026-06-03.
 
 ## Known Non-App Issue
 

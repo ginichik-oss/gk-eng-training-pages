@@ -58,64 +58,97 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "OPENAI_API_KEY is not configured" }, 500);
   }
 
-  const model = Deno.env.get("OPENAI_MODEL") || "gpt-4.1-mini";
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openAiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      store: false,
-      temperature: 0.2,
-      max_output_tokens: 700,
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text:
-                "You are a business English coach for a Japan-focused private equity professional. Draft polished, natural English for LP and investor conversations. Preserve placeholders such as [REDACTED_1], [AMOUNT], and [EMAIL] exactly. Do not add new facts. Keep confidential disclosures appropriately limited. Return JSON only with keys en, whyBetter, and tags.",
-            },
-          ],
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: JSON.stringify({
-                japaneseIntent: text,
-                sourceQuestionJp: payload.sourceQuestionJp || "",
-                sourceQuestionEn: payload.sourceQuestionEn || "",
-                context: payload.context || "LP meeting",
-                register: payload.register || "institutional",
-                confidentiality,
-                sanitized: Boolean(payload.sanitized),
-              }),
-            },
-          ],
-        },
-      ],
-    }),
-  });
-
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    return jsonResponse({ error: data?.error?.message || `OpenAI request failed: ${response.status}` }, 502);
+  const result = await createOpenAiDraft(openAiKey, payload, text, confidentiality);
+  if (!result.ok) {
+    return jsonResponse({ error: result.error }, 502);
   }
 
-  const outputText = extractOutputText(data);
+  const outputText = extractOutputText(result.data);
   const parsed = parseJsonObject(outputText);
   return jsonResponse({
     en: String(parsed.en || outputText || "").trim(),
     whyBetter: String(parsed.whyBetter || parsed.why_better || "").trim(),
     tags: Array.isArray(parsed.tags) ? parsed.tags.map((tag) => String(tag)).slice(0, 6) : [],
-    model,
+    model: result.model,
   });
 });
+
+async function createOpenAiDraft(
+  openAiKey: string,
+  payload: TranslatePayload,
+  text: string,
+  confidentiality: string,
+) {
+  const models = modelCandidates();
+  let lastError = "";
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openAiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          store: false,
+          max_output_tokens: 700,
+          input: [
+            {
+              role: "system",
+              content: [
+                {
+                  type: "input_text",
+                  text:
+                    "You are a business English coach for a Japan-focused private equity professional. Draft polished, natural English for LP and investor conversations. Preserve placeholders such as [REDACTED_1], [AMOUNT], and [EMAIL] exactly. Do not add new facts. Keep confidential disclosures appropriately limited. Return JSON only with keys en, whyBetter, and tags.",
+                },
+              ],
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: JSON.stringify({
+                    japaneseIntent: text,
+                    sourceQuestionJp: payload.sourceQuestionJp || "",
+                    sourceQuestionEn: payload.sourceQuestionEn || "",
+                    context: payload.context || "LP meeting",
+                    register: payload.register || "institutional",
+                    confidentiality,
+                    sanitized: Boolean(payload.sanitized),
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok) return { ok: true, data, model };
+      lastError = data?.error?.message || `OpenAI request failed: ${response.status}`;
+      if (!isRetryableOpenAiStatus(response.status)) break;
+      await sleep(700);
+    }
+  }
+  return { ok: false, error: lastError || "OpenAI request failed" };
+}
+
+function modelCandidates() {
+  const configured = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
+  return configured
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+}
+
+function isRetryableOpenAiStatus(status: number) {
+  return [408, 409, 429, 500, 502, 503, 504].includes(status);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function enforcePolicy(confidentiality: string, policy: string, confirmed: boolean) {
   if (policy === "strict" && confidentiality === "highly confidential") {
