@@ -101,6 +101,7 @@ Deployment note:
 - On 2026-06-03, the live app reached OpenAI but returned a generic OpenAI processing error with request ID `req_006068b13af248909282eb0a2b090c23`.
 - The Edge Function source was updated to default to current OpenAI docs guidance (`gpt-5.5`) when `OPENAI_MODEL` is unset, remove the older hard-coded default, and retry transient OpenAI status codes.
 - The updated `translate-phrase` function was redeployed successfully on 2026-06-03.
+- A second hardening update ensures `gpt-5.5` is appended as a fallback even if `OPENAI_MODEL` is configured to an older model name.
 
 ## Known Non-App Issue
 

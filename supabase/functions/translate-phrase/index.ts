@@ -136,10 +136,12 @@ async function createOpenAiDraft(
 
 function modelCandidates() {
   const configured = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
-  return configured
+  const models = configured
     .split(",")
     .map((model) => model.trim())
     .filter(Boolean);
+  if (!models.includes("gpt-5.5")) models.push("gpt-5.5");
+  return [...new Set(models)];
 }
 
 function isRetryableOpenAiStatus(status: number) {
